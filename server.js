@@ -34,23 +34,41 @@ const io = new Server(httpServer, {
 });
 
 async function getBoard(boardId) {
+  console.log(`Pobieram tablicę: ${boardId}`);
+
   const { data, error } = await supabase
     .from("boards")
     .select("elements")
     .eq("id", boardId)
-    .single();
+    .maybeSingle();
 
-  if (error) return [];
+  if (error) {
+    console.error("BŁĄD ODCZYTU SUPABASE:", error);
+    return [];
+  }
+
+  console.log(
+    `Pobrano tablicę: ${boardId}, elementów: ${data?.elements?.length || 0}`
+  );
 
   return data?.elements || [];
 }
 
 async function saveBoard(boardId, elements) {
-  await supabase.from("boards").upsert({
+  console.log(`Zapisuję tablicę: ${boardId}, elementów: ${elements.length}`);
+
+  const { data, error } = await supabase.from("boards").upsert({
     id: boardId,
     elements,
     updated_at: new Date().toISOString(),
   });
+
+  if (error) {
+    console.error("BŁĄD ZAPISU SUPABASE:", error);
+    return;
+  }
+
+  console.log(`Zapisano tablicę: ${boardId}`);
 }
 
 io.on("connection", (socket) => {
