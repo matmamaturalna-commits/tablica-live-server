@@ -47,19 +47,34 @@ async function getBoard(boardId) {
     return [];
   }
 
-  console.log(
-    `Pobrano tablicę: ${boardId}, elementów: ${data?.elements?.length || 0}`
-  );
+  const elements = Array.isArray(data?.elements) ? data.elements : [];
 
-  return data?.elements || [];
+  console.log(`Pobrano tablicę: ${boardId}, elementów: ${elements.length}`);
+
+  return elements;
 }
 
 async function saveBoard(boardId, elements) {
-  console.log(`Zapisuję tablicę: ${boardId}, elementów: ${elements.length}`);
+  const safeElements = Array.isArray(elements) ? elements : [];
 
-  const { data, error } = await supabase.from("boards").upsert({
+  console.log(
+    `Próba zapisu tablicy: ${boardId}, elementów: ${safeElements.length}`
+  );
+
+  if (safeElements.length === 0) {
+    const existingElements = await getBoard(boardId);
+
+    if (existingElements.length > 0) {
+      console.log(
+        `Pominięto pusty zapis dla ${boardId}, bo istnieje zapis z elementami.`
+      );
+      return;
+    }
+  }
+
+  const { error } = await supabase.from("boards").upsert({
     id: boardId,
-    elements,
+    elements: safeElements,
     updated_at: new Date().toISOString(),
   });
 
@@ -68,7 +83,7 @@ async function saveBoard(boardId, elements) {
     return;
   }
 
-  console.log(`Zapisano tablicę: ${boardId}`);
+  console.log(`Zapisano tablicę: ${boardId}, elementów: ${safeElements.length}`);
 }
 
 io.on("connection", (socket) => {
@@ -85,9 +100,15 @@ io.on("connection", (socket) => {
   });
 
   socket.on("board-change", async ({ boardId, elements }) => {
-    socket.to(boardId).emit("board-update", elements);
+    const safeElements = Array.isArray(elements) ? elements : [];
 
-    await saveBoard(boardId, elements);
+    console.log(
+      `ODEBRANO ZMIANĘ: ${boardId}, elementów: ${safeElements.length}`
+    );
+
+    socket.to(boardId).emit("board-update", safeElements);
+
+    await saveBoard(boardId, safeElements);
   });
 
   socket.on("disconnect", () => {
