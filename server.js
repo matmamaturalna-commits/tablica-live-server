@@ -20,7 +20,7 @@ const supabase = createClient(
 );
 
 app.get("/", (req, res) => {
-  res.send("Tablica live server działa z zapisem Supabase.");
+  res.send("Tablica live server działa z tokenami i zapisem Supabase.");
 });
 
 const httpServer = createServer(app);
@@ -33,21 +33,48 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 20 * 1024 * 1024,
 });
 
-async function getBoard(boardId) {
-  console.log(`Pobieram tablicę: ${boardId}`);
-
+async function getBoardRow(boardId) {
   const { data, error } = await supabase
     .from("boards")
-    .select("elements")
+    .select("id, elements, access_token")
     .eq("id", boardId)
     .maybeSingle();
 
   if (error) {
     console.error("BŁĄD ODCZYTU SUPABASE:", error);
-    return [];
+    return null;
   }
 
-  const elements = Array.isArray(data?.elements) ? data.elements : [];
+  return data;
+}
+
+async function checkBoardAccess(boardId, token) {
+  const board = await getBoardRow(boardId);
+
+  if (!board) {
+    console.log(`BLOKADA: tablica ${boardId} nie istnieje.`);
+    return false;
+  }
+
+  if (!board.access_token) {
+    console.log(`BLOKADA: tablica ${boardId} nie ma ustawionego tokena.`);
+    return false;
+  }
+
+  if (token && token === board.access_token) {
+    console.log(`Dostęp OK dla tablicy ${boardId}`);
+    return true;
+  }
+
+  console.log(`BLOKADA DOSTĘPU do tablicy ${boardId}`);
+  return false;
+}
+
+async function getBoard(boardId) {
+  console.log(`Pobieram tablicę: ${boardId}`);
+
+  const board = await getBoardRow(boardId);
+  const elements = Array.isArray(board?.elements) ? board.elements : [];
 
   console.log(`Pobrano tablicę: ${boardId}, elementów: ${elements.length}`);
 
@@ -89,7 +116,17 @@ async function saveBoard(boardId, elements) {
 io.on("connection", (socket) => {
   console.log("Połączono:", socket.id);
 
-  socket.on("join-board", async (boardId) => {
+  socket.on("join-board", async ({ boardId, token }) => {
+    const hasAccess = await checkBoardAccess(boardId, token);
+
+    if (!hasAccess) {
+      socket.emit("board-access-denied");
+      return;
+    }
+
+    socket.data.boardId = boardId;
+    socket.data.token = token;
+
     socket.join(boardId);
 
     const elements = await getBoard(boardId);
@@ -99,7 +136,14 @@ io.on("connection", (socket) => {
     console.log(`${socket.id} dołączył do pokoju ${boardId}`);
   });
 
-  socket.on("board-change", async ({ boardId, elements }) => {
+  socket.on("board-change", async ({ boardId, token, elements }) => {
+    const hasAccess = await checkBoardAccess(boardId, token);
+
+    if (!hasAccess) {
+      socket.emit("board-access-denied");
+      return;
+    }
+
     const safeElements = Array.isArray(elements) ? elements : [];
 
     console.log(
